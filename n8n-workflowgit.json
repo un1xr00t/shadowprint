@@ -1,0 +1,419 @@
+{
+  "name": "SHADOWPRINT API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "shadowprint-scan",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://YOUR_DOMAIN_HERE"
+        }
+      },
+      "id": "00c85349-4ed7-4989-8162-7ab13022aa4f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        4912,
+        -448
+      ],
+      "webhookId": "shadowprint-scan"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "auth-check",
+              "leftValue": "={{ $json.headers['x-shadowprint-key'] }}",
+              "rightValue": "YOUR_SECRET_KEY_HERE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6c35a148-7524-48ab-878b-213ea0c82344",
+      "name": "Auth Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5120,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: 'Unauthorized', code: 401 }) }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "8fc25ccc-efee-4a59-82a4-c3e76bd2e939",
+      "name": "Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        5312,
+        -288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const clientIP = $json.headers['x-forwarded-for'] || $json.headers['x-real-ip'] || 'unknown';\nconst email = $json.body.email || '';\nconst username = $json.body.username || '';\n\nif (!email && !username) {\n  return { error: 'Email or username required', code: 400 };\n}\n\nif (email && !email.match(/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/)) {\n  return { error: 'Invalid email format', code: 400 };\n}\n\nif (username && !username.match(/^[a-zA-Z0-9_.-]{2,40}$/)) {\n  return { error: 'Invalid username format', code: 400 };\n}\n\nreturn {\n  clientIP,\n  email: email.toLowerCase().trim(),\n  username: username.toLowerCase().trim(),\n  timestamp: Date.now(),\n  valid: true\n};"
+      },
+      "id": "b7cf1bfc-3605-4bfe-bb93-85cccb94edc5",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5312,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "valid-check",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "69c9ee38-0885-4e04-a0a3-c857bfce0c22",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        5520,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.error, code: $json.code }) }}",
+        "options": {
+          "responseCode": "={{ $json.code }}"
+        }
+      },
+      "id": "e533dbef-30db-43b8-afa2-1d62d60ac3f8",
+      "name": "Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        5712,
+        -288
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://haveibeenpwned.com/api/v3/breachedaccount/{{ encodeURIComponent($json.email) }}?truncateResponse=false",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "hibp-api-key",
+              "value": "YOUR_HIBP_API_KEY_HERE"
+            },
+            {
+              "name": "user-agent",
+              "value": "SHADOWPRINT-Scanner"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a01a9a2a-841e-4a0d-84e9-255d944e59f2",
+      "name": "HIBP Breaches",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5712,
+        -448
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "HIBP API Key"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('Validate Input').first().json;\nconst allItems = $input.all();\n\nlet breaches = [];\nlet hibpError = null;\n\nif (allItems.length > 0 && allItems[0].json.Name) {\n  breaches = allItems.map(item => ({\n    name: item.json.Name,\n    title: item.json.Title || item.json.Name,\n    domain: item.json.Domain || '',\n    breachDate: item.json.BreachDate || '',\n    addedDate: item.json.AddedDate || '',\n    pwnCount: item.json.PwnCount || 0,\n    description: item.json.Description || '',\n    dataClasses: item.json.DataClasses || [],\n    isVerified: item.json.IsVerified || false,\n    isSensitive: item.json.IsSensitive || false,\n    logoPath: item.json.LogoPath ? `https://haveibeenpwned.com${item.json.LogoPath}` : null\n  }));\n} else if (allItems[0]?.json?.statusCode === 404) {\n  breaches = [];\n} else if (allItems[0]?.json?.statusCode === 429) {\n  hibpError = 'Rate limited - try again later';\n}\n\nreturn {\n  ...input,\n  breaches,\n  breachCount: breaches.length,\n  hibpError\n};"
+      },
+      "id": "810ca6f1-bed4-4eb1-b169-6c55c8390749",
+      "name": "Process HIBP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5920,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Platform enumeration using n8n's built-in HTTP helper\nconst input = $json;\nconst username = input.username;\n\nif (!username) {\n  return { ...input, platforms: [], platformCount: 0, platformsFound: 0 };\n}\n\n// All platforms we check - expanded list\nconst platforms = [\n  { name: 'GitHub', url: `https://github.com/${username}`, apiUrl: `https://api.github.com/users/${username}`, icon: '🙈', checkType: 'status' },\n  { name: 'GitLab', url: `https://gitlab.com/${username}`, apiUrl: `https://gitlab.com/api/v4/users?username=${username}`, icon: '🦊', checkType: 'array' },\n  { name: 'Reddit', url: `https://reddit.com/user/${username}`, apiUrl: `https://www.reddit.com/user/${username}/about.json`, icon: '🤖', checkType: 'status' },\n  { name: 'Dev.to', url: `https://dev.to/${username}`, apiUrl: `https://dev.to/api/users/by_username?url=${username}`, icon: '👩‍💻', checkType: 'status' },\n  { name: 'Hacker News', url: `https://news.ycombinator.com/user?id=${username}`, apiUrl: `https://hacker-news.firebaseio.com/v0/user/${username}.json`, icon: '📰', checkType: 'notnull' },\n  { name: 'Keybase', url: `https://keybase.io/${username}`, apiUrl: `https://keybase.io/_/api/1.0/user/lookup.json?username=${username}`, icon: '🔐', checkType: 'keybase' },\n  { name: 'npm', url: `https://www.npmjs.com/~${username}`, apiUrl: `https://registry.npmjs.org/-/user/org.couchdb.user:${username}`, icon: '📦', checkType: 'status' },\n  { name: 'PyPI', url: `https://pypi.org/user/${username}/`, apiUrl: null, icon: '🐍', checkType: 'none' },\n  { name: 'Imgur', url: `https://imgur.com/user/${username}`, apiUrl: `https://api.imgur.com/account/v1/accounts/${username}?client_id=546c25a59c58ad7`, icon: '🖼️', checkType: 'status' },\n  { name: 'Pastebin', url: `https://pastebin.com/u/${username}`, apiUrl: `https://pastebin.com/u/${username}`, icon: '📋', checkType: 'status' },\n  { name: 'Twitter/X', url: `https://x.com/${username}`, apiUrl: null, icon: '𝕏', checkType: 'none' },\n  { name: 'Instagram', url: `https://instagram.com/${username}`, apiUrl: null, icon: '📷', checkType: 'none' },\n  { name: 'TikTok', url: `https://tiktok.com/@${username}`, apiUrl: null, icon: '🎵', checkType: 'none' },\n  { name: 'YouTube', url: `https://youtube.com/@${username}`, apiUrl: null, icon: '▶️', checkType: 'none' },\n  { name: 'Twitch', url: `https://twitch.tv/${username}`, apiUrl: null, icon: '🎮', checkType: 'none' },\n  { name: 'LinkedIn', url: `https://linkedin.com/in/${username}`, apiUrl: null, icon: '💼', checkType: 'none' },\n  { name: 'Medium', url: `https://medium.com/@${username}`, apiUrl: null, icon: '📝', checkType: 'none' },\n  { name: 'Pinterest', url: `https://pinterest.com/${username}`, apiUrl: null, icon: '📌', checkType: 'none' }\n];\n\nconst results = [];\n\nfor (const platform of platforms) {\n  let found = false;\n  let checkable = !!platform.apiUrl;\n  \n  if (platform.apiUrl) {\n    try {\n      const response = await this.helpers.httpRequest({\n        method: 'GET',\n        url: platform.apiUrl,\n        headers: { \n          'User-Agent': 'SHADOWPRINT-Scanner/2.0',\n          'Accept': 'application/json'\n        },\n        returnFullResponse: true,\n        ignoreHttpStatusErrors: true,\n        timeout: 8000\n      });\n      \n      const status = response.statusCode;\n      const body = response.body;\n      \n      if (platform.checkType === 'status') {\n        found = status === 200;\n      } else if (platform.checkType === 'array') {\n        found = Array.isArray(body) && body.length > 0;\n      } else if (platform.checkType === 'notnull') {\n        found = body !== null && body !== 'null' && status === 200;\n      } else if (platform.checkType === 'keybase') {\n        found = body?.status?.code === 0;\n      }\n    } catch (e) {\n      found = false;\n    }\n  }\n  \n  results.push({\n    name: platform.name,\n    url: platform.url,\n    icon: platform.icon,\n    found: found,\n    checkable: checkable\n  });\n}\n\nconst platformsFound = results.filter(p => p.found).length;\n\nreturn {\n  ...input,\n  platforms: results,\n  platformsFound,\n  username\n};"
+      },
+      "id": "927156e9-951b-4336-b890-acd5beb09da2",
+      "name": "Setup Platform Checks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6128,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json;\nconst email = input.email || '';\n\nfunction md5(string) {\n  function rotateLeft(val, shift) {\n    return (val << shift) | (val >>> (32 - shift));\n  }\n  \n  function addUnsigned(x, y) {\n    const x8 = x & 0x80000000;\n    const y8 = y & 0x80000000;\n    const x4 = x & 0x40000000;\n    const y4 = y & 0x40000000;\n    const result = (x & 0x3FFFFFFF) + (y & 0x3FFFFFFF);\n    if (x4 & y4) return result ^ 0x80000000 ^ x8 ^ y8;\n    if (x4 | y4) {\n      if (result & 0x40000000) return result ^ 0xC0000000 ^ x8 ^ y8;\n      return result ^ 0x40000000 ^ x8 ^ y8;\n    }\n    return result ^ x8 ^ y8;\n  }\n  \n  function F(x, y, z) { return (x & y) | (~x & z); }\n  function G(x, y, z) { return (x & z) | (y & ~z); }\n  function H(x, y, z) { return x ^ y ^ z; }\n  function I(x, y, z) { return y ^ (x | ~z); }\n  \n  function FF(a, b, c, d, x, s, ac) {\n    a = addUnsigned(a, addUnsigned(addUnsigned(F(b, c, d), x), ac));\n    return addUnsigned(rotateLeft(a, s), b);\n  }\n  function GG(a, b, c, d, x, s, ac) {\n    a = addUnsigned(a, addUnsigned(addUnsigned(G(b, c, d), x), ac));\n    return addUnsigned(rotateLeft(a, s), b);\n  }\n  function HH(a, b, c, d, x, s, ac) {\n    a = addUnsigned(a, addUnsigned(addUnsigned(H(b, c, d), x), ac));\n    return addUnsigned(rotateLeft(a, s), b);\n  }\n  function II(a, b, c, d, x, s, ac) {\n    a = addUnsigned(a, addUnsigned(addUnsigned(I(b, c, d), x), ac));\n    return addUnsigned(rotateLeft(a, s), b);\n  }\n  \n  const words = [];\n  let byteCount = string.length;\n  for (let i = 0; i < byteCount; i++) {\n    const position = i >>> 2;\n    words[position] = words[position] || 0;\n    words[position] |= string.charCodeAt(i) << ((i % 4) * 8);\n  }\n  const bitCount = byteCount * 8;\n  words[byteCount >>> 2] |= 0x80 << ((byteCount % 4) * 8);\n  words[(((byteCount + 8) >>> 6) << 4) + 14] = bitCount;\n  \n  let a = 0x67452301, b = 0xEFCDAB89, c = 0x98BADCFE, d = 0x10325476;\n  \n  for (let i = 0; i < words.length; i += 16) {\n    const AA = a, BB = b, CC = c, DD = d;\n    a = FF(a, b, c, d, words[i], 7, 0xD76AA478);\n    d = FF(d, a, b, c, words[i+1], 12, 0xE8C7B756);\n    c = FF(c, d, a, b, words[i+2], 17, 0x242070DB);\n    b = FF(b, c, d, a, words[i+3], 22, 0xC1BDCEEE);\n    a = FF(a, b, c, d, words[i+4], 7, 0xF57C0FAF);\n    d = FF(d, a, b, c, words[i+5], 12, 0x4787C62A);\n    c = FF(c, d, a, b, words[i+6], 17, 0xA8304613);\n    b = FF(b, c, d, a, words[i+7], 22, 0xFD469501);\n    a = FF(a, b, c, d, words[i+8], 7, 0x698098D8);\n    d = FF(d, a, b, c, words[i+9], 12, 0x8B44F7AF);\n    c = FF(c, d, a, b, words[i+10], 17, 0xFFFF5BB1);\n    b = FF(b, c, d, a, words[i+11], 22, 0x895CD7BE);\n    a = FF(a, b, c, d, words[i+12], 7, 0x6B901122);\n    d = FF(d, a, b, c, words[i+13], 12, 0xFD987193);\n    c = FF(c, d, a, b, words[i+14], 17, 0xA679438E);\n    b = FF(b, c, d, a, words[i+15], 22, 0x49B40821);\n    a = GG(a, b, c, d, words[i+1], 5, 0xF61E2562);\n    d = GG(d, a, b, c, words[i+6], 9, 0xC040B340);\n    c = GG(c, d, a, b, words[i+11], 14, 0x265E5A51);\n    b = GG(b, c, d, a, words[i], 20, 0xE9B6C7AA);\n    a = GG(a, b, c, d, words[i+5], 5, 0xD62F105D);\n    d = GG(d, a, b, c, words[i+10], 9, 0x02441453);\n    c = GG(c, d, a, b, words[i+15], 14, 0xD8A1E681);\n    b = GG(b, c, d, a, words[i+4], 20, 0xE7D3FBC8);\n    a = GG(a, b, c, d, words[i+9], 5, 0x21E1CDE6);\n    d = GG(d, a, b, c, words[i+14], 9, 0xC33707D6);\n    c = GG(c, d, a, b, words[i+3], 14, 0xF4D50D87);\n    b = GG(b, c, d, a, words[i+8], 20, 0x455A14ED);\n    a = GG(a, b, c, d, words[i+13], 5, 0xA9E3E905);\n    d = GG(d, a, b, c, words[i+2], 9, 0xFCEFA3F8);\n    c = GG(c, d, a, b, words[i+7], 14, 0x676F02D9);\n    b = GG(b, c, d, a, words[i+12], 20, 0x8D2A4C8A);\n    a = HH(a, b, c, d, words[i+5], 4, 0xFFFA3942);\n    d = HH(d, a, b, c, words[i+8], 11, 0x8771F681);\n    c = HH(c, d, a, b, words[i+11], 16, 0x6D9D6122);\n    b = HH(b, c, d, a, words[i+14], 23, 0xFDE5380C);\n    a = HH(a, b, c, d, words[i+1], 4, 0xA4BEEA44);\n    d = HH(d, a, b, c, words[i+4], 11, 0x4BDECFA9);\n    c = HH(c, d, a, b, words[i+7], 16, 0xF6BB4B60);\n    b = HH(b, c, d, a, words[i+10], 23, 0xBEBFBC70);\n    a = HH(a, b, c, d, words[i+13], 4, 0x289B7EC6);\n    d = HH(d, a, b, c, words[i], 11, 0xEAA127FA);\n    c = HH(c, d, a, b, words[i+3], 16, 0xD4EF3085);\n    b = HH(b, c, d, a, words[i+6], 23, 0x04881D05);\n    a = HH(a, b, c, d, words[i+9], 4, 0xD9D4D039);\n    d = HH(d, a, b, c, words[i+12], 11, 0xE6DB99E5);\n    c = HH(c, d, a, b, words[i+15], 16, 0x1FA27CF8);\n    b = HH(b, c, d, a, words[i+2], 23, 0xC4AC5665);\n    a = II(a, b, c, d, words[i], 6, 0xF4292244);\n    d = II(d, a, b, c, words[i+7], 10, 0x432AFF97);\n    c = II(c, d, a, b, words[i+14], 15, 0xAB9423A7);\n    b = II(b, c, d, a, words[i+5], 21, 0xFC93A039);\n    a = II(a, b, c, d, words[i+12], 6, 0x655B59C3);\n    d = II(d, a, b, c, words[i+3], 10, 0x8F0CCC92);\n    c = II(c, d, a, b, words[i+10], 15, 0xFFEFF47D);\n    b = II(b, c, d, a, words[i+1], 21, 0x85845DD1);\n    a = II(a, b, c, d, words[i+8], 6, 0x6FA87E4F);\n    d = II(d, a, b, c, words[i+15], 10, 0xFE2CE6E0);\n    c = II(c, d, a, b, words[i+6], 15, 0xA3014314);\n    b = II(b, c, d, a, words[i+13], 21, 0x4E0811A1);\n    a = II(a, b, c, d, words[i+4], 6, 0xF7537E82);\n    d = II(d, a, b, c, words[i+11], 10, 0xBD3AF235);\n    c = II(c, d, a, b, words[i+2], 15, 0x2AD7D2BB);\n    b = II(b, c, d, a, words[i+9], 21, 0xEB86D391);\n    a = addUnsigned(a, AA);\n    b = addUnsigned(b, BB);\n    c = addUnsigned(c, CC);\n    d = addUnsigned(d, DD);\n  }\n  \n  const hex = (n) => {\n    let s = '';\n    for (let i = 0; i < 4; i++) s += ('0' + ((n >> (i * 8)) & 0xFF).toString(16)).slice(-2);\n    return s;\n  };\n  \n  return hex(a) + hex(b) + hex(c) + hex(d);\n}\n\nconst gravatarHash = email ? md5(email.toLowerCase().trim()) : '';\n\nreturn {\n  ...input,\n  gravatarHash,\n  gravatarUrl: gravatarHash ? `https://www.gravatar.com/avatar/${gravatarHash}?d=404` : null\n};"
+      },
+      "id": "32643bdd-79b0-458b-9605-85b99d174cde",
+      "name": "Gravatar Setup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6320,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "HEAD",
+        "url": "={{ $json.gravatarUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 5000
+        }
+      },
+      "id": "b54fee3d-5a08-46d4-8ad4-79d94ad78dfe",
+      "name": "Check Gravatar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6528,
+        -448
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const processedData = $('Gravatar Setup').first().json;\nconst gravatarResponse = $json;\n\nconst hasGravatar = gravatarResponse.statusCode === 200;\n\nconst breaches = processedData.breaches || [];\nconst breachCount = breaches.length;\n\nconst platforms = processedData.platforms || [];\nconst platformsFound = processedData.platformsFound || 0;\n\nlet score = 0;\nscore += Math.min(50, breachCount * 8);\nconst verifiedBreaches = breaches.filter(b => b.isVerified).length;\nscore += verifiedBreaches * 3;\nscore += platformsFound * 5;\nif (hasGravatar) score += 5;\nscore = Math.min(99, Math.max(5, score));\n\nlet riskLevel = 'LOW';\nif (score >= 30 && score < 60) riskLevel = 'MODERATE';\nif (score >= 60) riskLevel = 'HIGH';\n\nconst scanId = Math.random().toString(36).substring(2, 10).toUpperCase();\n\nconst recommendations = [];\n\nif (breachCount > 0) {\n  recommendations.push({\n    icon: '🔐',\n    title: 'Change Compromised Passwords',\n    description: `Your email was found in ${breachCount} data breach${breachCount > 1 ? 'es' : ''}. Change passwords immediately for affected services.`,\n    priority: 'high'\n  });\n}\n\nif (breaches.some(b => b.dataClasses && b.dataClasses.includes('Passwords'))) {\n  recommendations.push({\n    icon: '⚠️',\n    title: 'Password Exposed',\n    description: 'Your password was directly exposed in at least one breach. Change it everywhere you used it.',\n    priority: 'high'\n  });\n}\n\nif (platformsFound > 3) {\n  recommendations.push({\n    icon: '👁️',\n    title: 'Review Privacy Settings',\n    description: `Found ${platformsFound} public profiles. Consider making accounts private.`,\n    priority: 'medium'\n  });\n}\n\nrecommendations.push({\n  icon: '🛡️',\n  title: 'Enable 2FA',\n  description: 'Add two-factor authentication to all accounts. Use an authenticator app over SMS.',\n  priority: score > 40 ? 'high' : 'medium'\n});\n\nif (hasGravatar) {\n  recommendations.push({\n    icon: '🖼️',\n    title: 'Gravatar Detected',\n    description: 'Your email has a public Gravatar profile image, which can be used to identify you across sites.',\n    priority: 'low'\n  });\n}\n\nrecommendations.push({\n  icon: '📧',\n  title: 'Use Email Aliases',\n  description: 'Use unique email aliases for different services to limit exposure.',\n  priority: 'low'\n});\n\nreturn {\n  success: true,\n  scanId,\n  target: processedData.email || processedData.username,\n  targetType: processedData.email ? 'email' : 'username',\n  score,\n  riskLevel,\n  breaches: breaches.map(b => ({\n    name: b.title || b.name,\n    domain: b.domain,\n    date: b.breachDate,\n    records: b.pwnCount ? b.pwnCount.toLocaleString() : 'Unknown',\n    dataTypes: b.dataClasses || [],\n    logo: b.logoPath,\n    verified: b.isVerified\n  })),\n  breachCount,\n  platforms: platforms.sort((a, b) => b.found - a.found),\n  platformsFound,\n  hasGravatar,\n  gravatarUrl: hasGravatar ? `https://www.gravatar.com/avatar/${processedData.gravatarHash}` : null,\n  recommendations: recommendations.slice(0, 5),\n  scannedAt: new Date().toISOString()\n};"
+      },
+      "id": "36d8765c-7e80-4ff7-b6db-884cd135e757",
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6720,
+        -448
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "https://YOUR_DOMAIN_HERE"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "1a3b0644-d6e5-4d4e-b971-beb31102b366",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        6912,
+        -448
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Auth Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Check": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "HIBP Breaches",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HIBP Breaches": {
+      "main": [
+        [
+          {
+            "node": "Process HIBP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process HIBP": {
+      "main": [
+        [
+          {
+            "node": "Setup Platform Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Setup Platform Checks": {
+      "main": [
+        [
+          {
+            "node": "Gravatar Setup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravatar Setup": {
+      "main": [
+        [
+          {
+            "node": "Check Gravatar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Gravatar": {
+      "main": [
+        [
+          {
+            "node": "Build Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Response": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "placeholder",
+  "meta": {
+    "instanceId": "placeholder"
+  },
+  "id": "placeholder",
+  "tags": []
+}
