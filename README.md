@@ -1,5 +1,3 @@
-# /home/claude/github/README.md
-
 # SHADOWPRINT v2.0
 
 A cyberpunk-themed digital exposure scanner that checks email addresses against real breach databases and enumerates platform presence.
