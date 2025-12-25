@@ -4,6 +4,9 @@ A cyberpunk-themed digital exposure scanner that checks email addresses against 
 
 ![SHADOWPRINT](https://img.shields.io/badge/version-2.0-cyan) ![License](https://img.shields.io/badge/license-MIT-green)
 
+<img width="2456" height="1252" alt="image" src="https://github.com/user-attachments/assets/d05711e4-60e9-4c12-8597-23c0f56e161a" />
+
+
 ## Features
 
 - **Real Breach Data** - Powered by HaveIBeenPwned API
